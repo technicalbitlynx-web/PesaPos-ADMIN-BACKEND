@@ -146,7 +146,33 @@ async function getDevices(req, res) {
   try {
     const { getSocketManager } = require('../../websocket/socketManager');
     const sm = getSocketManager();
-    const devices = sm ? sm.getConnectedDevicesMeta() : [];
+    const onlineMetas = sm ? sm.getConnectedDevicesMeta() : [];
+    const onlineMap = new Map(onlineMetas.map((d) => [d.deviceId, d]));
+
+    const licenses = await prisma.license.findMany({
+      where: { status: 'ACTIVE', device_id: { not: null } },
+      include: {
+        client: { select: { business_name: true } },
+        subscription: { select: { plan_name: true, expiry_date: true } },
+      },
+      orderBy: { activation_date: 'desc' },
+    });
+
+    const devices = licenses.map((lic) => {
+      const live = onlineMap.get(lic.device_id) || {};
+      return {
+        deviceId: lic.device_id,
+        licenseKey: lic.license_key,
+        licenseId: lic.id,
+        businessName: live.businessName || lic.client?.business_name || null,
+        planName: live.planName || lic.subscription?.plan_name || null,
+        expiryDate: lic.expiry_date || lic.subscription?.expiry_date || null,
+        activationDate: lic.activation_date,
+        online: onlineMap.has(lic.device_id),
+        ...live,
+      };
+    });
+
     return successResponse(res, { data: devices });
   } catch (err) {
     return errorResponse(res, err.message || 'Error', 500);
