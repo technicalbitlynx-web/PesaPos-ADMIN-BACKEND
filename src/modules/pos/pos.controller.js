@@ -29,12 +29,21 @@ async function validateLicense(req, res) {
       return successResponse(res, { data: { valid: false, status: 'expired', message: 'License has expired', expiry_date: license.expiry_date } });
     }
 
+    // Auto-activate PENDING license on first POS use
     if (license.status === 'PENDING') {
-      return successResponse(res, { data: { valid: false, status: 'pending', message: 'License not yet activated' } });
-    }
-
-    // Bind device on first use
-    if (!license.device_id && device_id) {
+      const fingerprintHash = fingerprint ? hashFingerprint(fingerprint) : null;
+      await prisma.license.update({
+        where: { id: license.id },
+        data: {
+          status: 'ACTIVE',
+          device_id: device_id || null,
+          device_fingerprint: fingerprintHash,
+          activation_date: new Date(),
+          last_check: new Date(),
+        },
+      });
+    } else if (!license.device_id && device_id) {
+      // Bind device on first use (ACTIVE but unbound)
       const fingerprintHash = fingerprint ? hashFingerprint(fingerprint) : null;
       await prisma.license.update({
         where: { id: license.id },
