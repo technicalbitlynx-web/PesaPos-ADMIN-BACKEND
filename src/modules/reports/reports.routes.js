@@ -1,0 +1,14 @@
+const router = require('express').Router();
+const controller = require('./reports.controller');
+const { authenticate } = require('../../middleware/auth');
+const { authorize } = require('../../middleware/rbac');
+
+router.use(authenticate, authorize('reports:read'));
+
+router.get('/revenue', controller.revenue);
+router.get('/clients', controller.activeClients);
+router.get('/licenses/expired', controller.expiredLicenses);
+router.get('/monthly', controller.monthlyPerformance);
+router.get('/export/:type/:format', controller.exportReport);
+
+module.exports = router;

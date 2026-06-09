@@ -1,0 +1,186 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Enum values stored as String in SQLite
+// AdminRole:         SUPER_ADMIN | FINANCE_OFFICER | SUPPORT_AGENT | SALES_MANAGER
+// ClientStatus:      ACTIVE | SUSPENDED | PENDING
+// SubscriptionStatus: ACTIVE | EXPIRED | CANCELLED | PENDING
+// PaymentMethod:     CASH | MOBILE_MONEY | CARD | BANK
+// PaymentStatus:     PENDING | APPROVED | FAILED
+// LicenseStatus:     ACTIVE | EXPIRED | SUSPENDED | PENDING
+// TicketStatus:      OPEN | PENDING | RESOLVED | CLOSED
+
+model AdminUser {
+  id         String    @id @default(uuid())
+  name       String
+  email      String    @unique
+  password   String
+  role       String    @default("SUPER_ADMIN")
+  is_active  Boolean   @default(true)
+  last_login DateTime?
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+
+  approved_payments Payment[]     @relation("ApprovedBy")
+  ticket_replies    TicketReply[]
+  audit_logs        AuditLog[]
+}
+
+model Client {
+  id            String   @id @default(uuid())
+  business_name String
+  owner_name    String
+  email         String   @unique
+  phone         String
+  address       String?
+  status        String   @default("PENDING")
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  subscriptions Subscription[]
+  payments      Payment[]
+  licenses      License[]
+  invoices      Invoice[]
+  tickets       Ticket[]
+}
+
+model SubscriptionPlan {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  price         Float
+  duration_days Int
+  features      String?
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id          String   @id @default(uuid())
+  client_id   String
+  plan_id     String
+  plan_name   String
+  price       Float
+  start_date  DateTime
+  expiry_date DateTime
+  status      String   @default("PENDING")
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  client   Client           @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  plan     SubscriptionPlan @relation(fields: [plan_id], references: [id])
+  payments Payment[]
+  licenses License[]
+}
+
+model Payment {
+  id               String    @id @default(uuid())
+  client_id        String
+  subscription_id  String?
+  amount           Float
+  method           String
+  reference_number String?   @unique
+  status           String    @default("PENDING")
+  approved_by_id   String?
+  notes            String?
+  date             DateTime  @default(now())
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  client       Client        @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscription_id], references: [id])
+  approved_by  AdminUser?    @relation("ApprovedBy", fields: [approved_by_id], references: [id])
+  invoice      Invoice?
+}
+
+model License {
+  id                 String    @id @default(uuid())
+  client_id          String
+  subscription_id    String?
+  license_key        String    @unique
+  device_id          String?
+  device_fingerprint String?
+  status             String    @default("PENDING")
+  activation_date    DateTime?
+  expiry_date        DateTime?
+  last_check         DateTime?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  client       Client        @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscription_id], references: [id])
+}
+
+model Invoice {
+  id             String    @id @default(uuid())
+  client_id      String
+  payment_id     String    @unique
+  invoice_number String    @unique
+  amount         Float
+  pdf_path       String?
+  sent_at        DateTime?
+  created_at     DateTime  @default(now())
+
+  client  Client  @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  payment Payment @relation(fields: [payment_id], references: [id])
+}
+
+model Ticket {
+  id          String   @id @default(uuid())
+  client_id   String
+  subject     String
+  message     String
+  status      String   @default("OPEN")
+  assigned_to String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  client  Client        @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  replies TicketReply[]
+}
+
+model TicketReply {
+  id          String   @id @default(uuid())
+  ticket_id   String
+  message     String
+  sender_id   String
+  sender_type String
+  admin_id    String?
+  created_at  DateTime @default(now())
+
+  ticket Ticket     @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  admin  AdminUser? @relation(fields: [admin_id], references: [id])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  admin_id    String?
+  action      String
+  resource    String
+  resource_id String?
+  details     String?
+  ip_address  String?
+  created_at  DateTime @default(now())
+
+  admin AdminUser? @relation(fields: [admin_id], references: [id])
+}
+
+model PosSalesReport {
+  id           String   @id
+  license_key  String
+  device_id    String?
+  report_date  String
+  total_sales  Float    @default(0)
+  total_profit Float    @default(0)
+  items_sold   Int      @default(0)
+  payload      String?
+  created_at   DateTime @default(now())
+}

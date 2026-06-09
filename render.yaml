@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: pos-admin-backend
+    runtime: node
+    buildCommand: npm ci && npx prisma generate
+    startCommand: node src/server.js
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_ACCESS_EXPIRES_IN
+        value: 15m
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: STORAGE_PATH
+        value: ./storage
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 900000
+      - key: RATE_LIMIT_MAX
+        value: 100
+
+  - type: cron
+    name: pos-keep-alive
+    runtime: node
+    schedule: "*/14 * * * *"
+    buildCommand: echo ok
+    startCommand: node -e "require('https').get('https://pos-admin-backend.onrender.com/health', r => process.exit(0)).on('error', () => process.exit(0))"
+    plan: free
