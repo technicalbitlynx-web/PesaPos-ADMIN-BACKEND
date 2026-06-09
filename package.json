@@ -10,7 +10,8 @@
     "db:generate": "npx prisma generate",
     "db:seed": "node prisma/seed.js",
     "db:studio": "npx prisma studio",
-    "db:reset": "npx prisma migrate reset"
+    "db:reset": "npx prisma migrate reset",
+    "vercel-build": "npx prisma generate"
   },
   "dependencies": {
     "@libsql/client": "^0.8.1",

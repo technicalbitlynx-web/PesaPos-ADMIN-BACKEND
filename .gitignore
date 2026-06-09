@@ -7,3 +7,5 @@ logs/
 .DS_Store
 prisma/prisma/*.db
 prisma/prisma/*.db-journal
+
+.vercel
