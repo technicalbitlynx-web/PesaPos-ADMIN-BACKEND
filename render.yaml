@@ -2,7 +2,7 @@ services:
   - type: web
     name: pos-admin-backend
     runtime: node
-    buildCommand: npm ci && npx prisma generate
+    buildCommand: npm install && npx prisma generate
     startCommand: node src/server.js
     plan: free
     envVars:
