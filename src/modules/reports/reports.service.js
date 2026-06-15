@@ -20,7 +20,7 @@ async function revenue(query) {
   }, {});
 
   const byMonth = payments.reduce((acc, p) => {
-    const key = p.date.toISOString().slice(0, 7);
+    const key = new Date(p.date).toISOString().slice(0, 7);
     acc[key] = (acc[key] || 0) + Number(p.amount);
     return acc;
   }, {});

@@ -3,7 +3,8 @@ const { successResponse, errorResponse } = require('../../utils/helpers');
 
 async function create(req, res, next) {
   try {
-    const client = await service.create({ ...req.body, onboarded_by: req.admin?.id || null });
+    const email = req.body.email || `client.${Date.now()}.${Math.random().toString(36).slice(2, 7)}@pos.local`;
+    const client = await service.create({ ...req.body, email, onboarded_by: req.admin?.id || null });
     successResponse(res, { data: client }, 201, 'Client created');
   } catch (err) {
     if (err.statusCode) return errorResponse(res, err.message, err.statusCode);

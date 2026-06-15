@@ -98,7 +98,7 @@ async function myStats(req, res) {
     // Month-by-month breakdown (last 6 months)
     const monthlyMap = {};
     payments.forEach((p) => {
-      const key = p.date ? p.date.toISOString().slice(0, 7) : 'unknown';
+      const key = p.date ? new Date(p.date).toISOString().slice(0, 7) : 'unknown';
       if (!monthlyMap[key]) monthlyMap[key] = { month: key, total: 0, approved: 0 };
       monthlyMap[key].total   += p.amount;
       if (p.status === 'APPROVED') monthlyMap[key].approved += p.amount;
