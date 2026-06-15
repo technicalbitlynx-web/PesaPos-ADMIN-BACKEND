@@ -19,17 +19,21 @@ datasource db {
 // TicketStatus:      OPEN | PENDING | RESOLVED | CLOSED
 
 model AdminUser {
-  id         String    @id @default(uuid())
-  name       String
-  email      String    @unique
-  password   String
-  role       String    @default("SUPER_ADMIN")
-  is_active  Boolean   @default(true)
-  last_login DateTime?
-  created_at DateTime  @default(now())
-  updated_at DateTime  @updatedAt
+  id              String    @id @default(uuid())
+  name            String
+  email           String    @unique
+  password        String
+  role            String    @default("SUPER_ADMIN")
+  phone           String?
+  commission_rate Float     @default(0.10)
+  is_active       Boolean   @default(true)
+  last_login      DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
 
-  approved_payments Payment[]     @relation("ApprovedBy")
+  approved_payments Payment[]  @relation("ApprovedBy")
+  recorded_payments Payment[]  @relation("RecordedBy")
+  onboarded_clients Client[]   @relation("OfficerClients")
   ticket_replies    TicketReply[]
   audit_logs        AuditLog[]
 }
@@ -42,9 +46,11 @@ model Client {
   phone         String
   address       String?
   status        String   @default("PENDING")
+  onboarded_by  String?
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
 
+  officer       AdminUser?     @relation("OfficerClients", fields: [onboarded_by], references: [id])
   subscriptions Subscription[]
   payments      Payment[]
   licenses      License[]
@@ -91,6 +97,7 @@ model Payment {
   reference_number String?   @unique
   status           String    @default("PENDING")
   approved_by_id   String?
+  recorded_by      String?
   notes            String?
   date             DateTime  @default(now())
   created_at       DateTime  @default(now())
@@ -99,6 +106,7 @@ model Payment {
   client       Client        @relation(fields: [client_id], references: [id], onDelete: Cascade)
   subscription Subscription? @relation(fields: [subscription_id], references: [id])
   approved_by  AdminUser?    @relation("ApprovedBy", fields: [approved_by_id], references: [id])
+  recorder     AdminUser?    @relation("RecordedBy", fields: [recorded_by], references: [id])
   invoice      Invoice?
 }
 

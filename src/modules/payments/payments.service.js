@@ -3,7 +3,7 @@ const { paginate, paginatedResponse, generateInvoiceNumber } = require('../../ut
 const { generateLicenseKey } = require('../../utils/licenseGenerator');
 const { getSocketManager } = require('../../websocket/socketManager');
 
-async function record(data, adminId) {
+async function record(data, adminId, adminRole) {
   const { client_id, subscription_id, method, reference_number, notes } = data;
   const amount = parseFloat(data.amount);
   if (isNaN(amount) || amount <= 0) throw { statusCode: 400, message: 'Invalid amount' };
@@ -11,21 +11,32 @@ async function record(data, adminId) {
   const client = await prisma.client.findUnique({ where: { id: client_id } });
   if (!client) throw { statusCode: 404, message: 'Client not found' };
 
+  // SALES_MANAGER (marketing officers) record PENDING payments; others auto-approve
+  const isSalesManager = adminRole === 'SALES_MANAGER';
+
   const payment = await prisma.$transaction(async (tx) => {
     const p = await tx.payment.create({
-      data: { client_id, subscription_id: subscription_id || null, amount, method, reference_number: reference_number || null, notes: notes || null, status: 'APPROVED', approved_by_id: adminId },
+      data: {
+        client_id,
+        subscription_id: subscription_id || null,
+        amount,
+        method,
+        reference_number: reference_number || null,
+        notes: notes || null,
+        status: isSalesManager ? 'PENDING' : 'APPROVED',
+        approved_by_id: isSalesManager ? null : adminId,
+        recorded_by: adminId,
+      },
       include: { client: { select: { business_name: true, email: true } } },
     });
 
-    if (subscription_id) {
+    // Only auto-activate subscription/license when payment is immediately approved
+    if (!isSalesManager && subscription_id) {
       const sub = await tx.subscription.update({
         where: { id: subscription_id },
         data: { status: 'ACTIVE' },
       });
-      await tx.client.update({
-        where: { id: client_id },
-        data: { status: 'ACTIVE' },
-      });
+      await tx.client.update({ where: { id: client_id }, data: { status: 'ACTIVE' } });
 
       const licenseCount = await tx.license.count({ where: { subscription_id } });
       if (licenseCount === 0) {
@@ -45,19 +56,17 @@ async function record(data, adminId) {
           data: { status: 'ACTIVE', activation_date: new Date() },
         });
       }
-    }
 
-    const invoiceNumber = generateInvoiceNumber();
-    await tx.invoice.create({
-      data: { client_id, payment_id: p.id, invoice_number: invoiceNumber, amount },
-    });
+      const invoiceNumber = generateInvoiceNumber();
+      await tx.invoice.create({ data: { client_id, payment_id: p.id, invoice_number: invoiceNumber, amount } });
+    }
 
     return p;
   });
 
-  const sm = getSocketManager();
-  if (sm && client_id) {
-    sm.notifyClient(client_id, 'payment:approved', { paymentId: payment.id });
+  if (!isSalesManager) {
+    const sm = getSocketManager();
+    if (sm && client_id) sm.notifyClient(client_id, 'payment:approved', { paymentId: payment.id });
   }
 
   return payment;

@@ -4,7 +4,7 @@ const ROLE_PERMISSIONS = {
   SUPER_ADMIN: ['*'],
   FINANCE_OFFICER: ['payments:*', 'invoices:*', 'reports:read', 'clients:read'],
   SUPPORT_AGENT: ['tickets:*', 'clients:read'],
-  SALES_MANAGER: ['clients:*', 'subscriptions:*', 'reports:read'],
+  SALES_MANAGER: ['clients:*', 'subscriptions:*', 'licenses:create', 'payments:create', 'reports:read'],
 };
 
 function hasPermission(role, required) {

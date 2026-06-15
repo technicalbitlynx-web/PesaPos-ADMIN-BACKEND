@@ -3,7 +3,7 @@ const { successResponse, errorResponse } = require('../../utils/helpers');
 
 async function record(req, res, next) {
   try {
-    const data = await service.record(req.body, req.admin.id);
+    const data = await service.record(req.body, req.admin.id, req.admin.role);
     successResponse(res, { data }, 201, 'Payment recorded');
   } catch (err) {
     if (err.statusCode) return errorResponse(res, err.message, err.statusCode);
