@@ -138,7 +138,9 @@ async function validateLicense(req, res) {
       const deviceRow = await prisma.licenseDevice.findUnique({
         where: { license_key_device_id: { license_key, device_id } },
       });
-      if (deviceRow && deviceRow.is_active) {
+      // device_name is only set by an explicit registerDevice call — use it to distinguish
+      // a row auto-created by validate-license (device_name=null) from a properly registered device
+      if (deviceRow && deviceRow.is_active && deviceRow.device_name !== null) {
         device_info = { registered: true, device_type: deviceRow.device_type };
       }
     }
