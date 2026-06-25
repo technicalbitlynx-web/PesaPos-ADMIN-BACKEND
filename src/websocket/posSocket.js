@@ -105,6 +105,40 @@ function setupWebSocket(io) {
         }
       });
 
+      // ── Real-time data sync between devices ──────────────────────────────
+      socket.on('pos:data-push', async (payload) => {
+        try {
+          // Persist to cloud as the latest snapshot
+          const { license_key: lk, products, sales, credits, suppliers, expenses, stock_log, quotations } = payload;
+          if (lk) {
+            const blob = {};
+            if (products)   blob.products   = JSON.stringify(products);
+            if (sales)      blob.sales       = JSON.stringify(sales);
+            if (credits)    blob.credits     = JSON.stringify(credits);
+            if (suppliers)  blob.suppliers   = JSON.stringify(suppliers);
+            if (expenses)   blob.expenses    = JSON.stringify(expenses);
+            if (stock_log)  blob.stock_log   = JSON.stringify(stock_log);
+            if (quotations) blob.quotations  = JSON.stringify(quotations);
+            if (Object.keys(blob).length) {
+              await prisma.posData.upsert({
+                where: { license_key: lk },
+                update: { ...blob, updated_at: new Date() },
+                create: { license_key: lk, ...blob },
+              }).catch(() => {});
+            }
+          }
+          // Broadcast to all other POS devices with same license key
+          const sockets = await io.fetchSockets();
+          sockets.forEach(s => {
+            if (s.licenseKey === licenseKey && s.id !== socket.id && s.connectionType === 'pos') {
+              s.emit('pos:data-push', payload);
+            }
+          });
+        } catch (err) {
+          logger.error('pos:data-push error', { message: err.message });
+        }
+      });
+
       // ── Disconnect ───────────────────────────────────────────────────────
       socket.on('disconnect', () => {
         logger.info('POS device disconnected', { deviceId });
