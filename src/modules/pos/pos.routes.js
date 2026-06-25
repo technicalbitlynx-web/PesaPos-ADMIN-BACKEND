@@ -30,4 +30,9 @@ router.get('/devices/list',                     posLimiter, controller.listPosDe
 router.put('/devices/:deviceId/reassign',       posLimiter, controller.reassignDevice);
 router.delete('/devices/:deviceId/deregister',  posLimiter, controller.deregisterDevice);
 
+// POS device credentials — manager creates access codes for cashier POS setup
+router.post('/device-credentials',         posLimiter, controller.createDeviceCredential);
+router.get('/device-credentials',          posLimiter, controller.listDeviceCredentials);
+router.delete('/device-credentials/:id',   posLimiter, controller.deleteDeviceCredential);
+
 module.exports = router;

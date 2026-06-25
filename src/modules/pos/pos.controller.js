@@ -505,7 +505,9 @@ async function removeOperator(req, res, next) {
 
 async function registerDevice(req, res) {
   try {
-    const { license_key, device_id, device_type, platform, device_name, operator_username } = req.body;
+    const { license_key, device_id, device_type, platform, manager_username, manager_pin, access_code } = req.body;
+    let device_name = req.body.device_name;
+
     if (!license_key || !device_id || !device_type) {
       return errorResponse(res, 'license_key, device_id and device_type are required', 400);
     }
@@ -523,13 +525,27 @@ async function registerDevice(req, res) {
 
     const normalizedPlatform = normalizePlatform(platform);
 
+    // ── Manager registration: require manager PIN if any operator already exists ──
     if (device_type === 'manager') {
+      const anyManager = await prisma.posOperator.findFirst({
+        where: { license_key, is_active: true, role: 'manager' },
+      });
+      if (anyManager) {
+        if (!manager_username || !manager_pin) {
+          return errorResponse(res, 'Manager credentials are required to register a manager device', 403);
+        }
+        const authorized = await verifyManagerPin(license_key, manager_username, manager_pin);
+        if (!authorized) {
+          await logDeviceAudit({ license_key, device_id, device_type, action: 'register', result: 'denied', details: { reason: 'invalid_pin' }, ip_address: req.ip });
+          return errorResponse(res, 'Invalid manager credentials', 403);
+        }
+      }
+
       const limits = getPlanLimits(license.subscription?.plan_name);
       const limitKey = normalizedPlatform === 'mobile' ? 'manager_mobile' : 'manager_desktop';
       const limit = limits[limitKey];
 
       if (limit !== null) {
-        // Only count against the limit if this is a new manager device (not a re-registration)
         const existing = await prisma.licenseDevice.findUnique({
           where: { license_key_device_id: { license_key, device_id } },
         });
@@ -537,20 +553,46 @@ async function registerDevice(req, res) {
         if (isNewManagerDevice) {
           const used = await getManagerDeviceCount(license_key, normalizedPlatform);
           if (used >= limit) {
-            await logDeviceAudit({
-              license_key, device_id, device_type,
-              user_id: operator_username || null,
-              action: 'register', result: 'denied',
-              details: { reason: 'limit_exceeded', limit, used },
-              ip_address: req.ip,
-            });
-            return errorResponse(
-              res,
-              `Manager ${normalizedPlatform} device limit reached (${limit}/${limit}). Deregister an existing device or upgrade your plan.`,
-              403
-            );
+            await logDeviceAudit({ license_key, device_id, device_type, user_id: manager_username || null, action: 'register', result: 'denied', details: { reason: 'limit_exceeded', limit, used }, ip_address: req.ip });
+            return errorResponse(res, `Manager ${normalizedPlatform} device limit reached (${limit}/${limit}). Deregister an existing device or upgrade your plan.`, 403);
           }
         }
+      }
+    }
+
+    // ── POS registration: require a valid access code ─────────────────────────
+    if (device_type === 'pos') {
+      if (!access_code) {
+        // Check if any credentials exist — if so, require one
+        const credCount = await prisma.$queryRawUnsafe(
+          `SELECT COUNT(*) as cnt FROM PosDeviceCredential WHERE license_key = ? AND is_active = 1`,
+          license_key
+        );
+        if (Number(credCount[0]?.cnt || 0) > 0) {
+          return errorResponse(res, 'Access code required. Ask your manager for a POS device access code.', 403);
+        }
+        // No credentials exist yet — allow legacy open registration
+      } else {
+        const creds = await prisma.$queryRawUnsafe(
+          `SELECT id, slot_name, access_code_hash FROM PosDeviceCredential WHERE license_key = ? AND is_active = 1`,
+          license_key
+        );
+        let matchedCred = null;
+        for (const cred of creds) {
+          if (await bcrypt.compare(String(access_code).trim(), String(cred.access_code_hash))) {
+            matchedCred = cred; break;
+          }
+        }
+        if (!matchedCred) {
+          await logDeviceAudit({ license_key, device_id, device_type, action: 'register', result: 'denied', details: { reason: 'invalid_access_code' }, ip_address: req.ip });
+          return errorResponse(res, 'Invalid access code. Ask your manager to create or share a POS device credential.', 403);
+        }
+        // Credential matched — use slot name as device name and claim the slot
+        device_name = matchedCred.slot_name;
+        await prisma.$executeRawUnsafe(
+          `UPDATE PosDeviceCredential SET device_id = ?, updated_at = ? WHERE id = ?`,
+          device_id, new Date().toISOString(), matchedCred.id
+        );
       }
     }
 
@@ -559,7 +601,7 @@ async function registerDevice(req, res) {
       update: {
         device_type,
         device_name: device_name || null,
-        registered_by: operator_username || null,
+        registered_by: manager_username || null,
         platform: normalizedPlatform,
         is_active: true,
         last_seen: new Date(),
@@ -571,21 +613,21 @@ async function registerDevice(req, res) {
         device_type,
         device_name: device_name || null,
         platform: normalizedPlatform,
-        registered_by: operator_username || null,
+        registered_by: manager_username || null,
         is_active: true,
       },
     });
 
     await logDeviceAudit({
       license_key, device_id, device_type,
-      user_id: operator_username || null,
+      user_id: manager_username || null,
       action: 'register', result: 'success',
       ip_address: req.ip,
     });
 
     return successResponse(
       res,
-      { data: { registered: true, device_type: row.device_type, device_id, platform: normalizedPlatform } },
+      { data: { registered: true, device_type: row.device_type, device_id, device_name: row.device_name, platform: normalizedPlatform } },
       201,
       'Device registered'
     );
@@ -764,10 +806,84 @@ async function deregisterDevice(req, res) {
   }
 }
 
+// ─── POS Device Credentials ──────────────────────────────────────────────────
+
+async function createDeviceCredential(req, res) {
+  try {
+    const { license_key, manager_username, manager_pin, slot_name, access_code } = req.body;
+    if (!license_key || !manager_username || !manager_pin || !slot_name || !access_code) {
+      return errorResponse(res, 'license_key, manager_username, manager_pin, slot_name, and access_code are required', 400);
+    }
+    const code = String(access_code).trim();
+    if (!/^\d{4,8}$/.test(code)) return errorResponse(res, 'access_code must be 4–8 digits', 400);
+
+    const authorized = await verifyManagerPin(license_key, manager_username, manager_pin);
+    if (!authorized) return errorResponse(res, 'Invalid manager credentials', 403);
+
+    const hash = await bcrypt.hash(code, 10);
+    const now  = new Date().toISOString();
+
+    const existing = await prisma.$queryRawUnsafe(
+      `SELECT id FROM PosDeviceCredential WHERE license_key = ? AND slot_name = ?`,
+      license_key, slot_name
+    );
+    if (existing.length > 0) {
+      await prisma.$executeRawUnsafe(
+        `UPDATE PosDeviceCredential SET access_code_hash = ?, device_id = NULL, is_active = 1, updated_at = ? WHERE license_key = ? AND slot_name = ?`,
+        hash, now, license_key, slot_name
+      );
+    } else {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO PosDeviceCredential (id, license_key, slot_name, access_code_hash, device_id, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, 1, ?, ?)`,
+        uuidv4(), license_key, slot_name, hash, now, now
+      );
+    }
+    return successResponse(res, { slot_name }, 201, 'POS device credential created');
+  } catch (err) {
+    return errorResponse(res, err.message || 'Failed to create credential', 500);
+  }
+}
+
+async function listDeviceCredentials(req, res) {
+  try {
+    const { license_key } = req.query;
+    if (!license_key) return errorResponse(res, 'license_key is required', 400);
+    const creds = await prisma.$queryRawUnsafe(
+      `SELECT id, slot_name, device_id, is_active, created_at, updated_at FROM PosDeviceCredential WHERE license_key = ? AND is_active = 1 ORDER BY created_at DESC`,
+      license_key
+    );
+    return successResponse(res, { credentials: creds }, 200, 'OK');
+  } catch (err) {
+    return errorResponse(res, err.message || 'Failed to list credentials', 500);
+  }
+}
+
+async function deleteDeviceCredential(req, res) {
+  try {
+    const { id } = req.params;
+    const { license_key, manager_username, manager_pin } = req.body;
+    if (!license_key || !manager_username || !manager_pin) {
+      return errorResponse(res, 'license_key, manager_username and manager_pin are required', 400);
+    }
+    const authorized = await verifyManagerPin(license_key, manager_username, manager_pin);
+    if (!authorized) return errorResponse(res, 'Invalid manager credentials', 403);
+
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT id FROM PosDeviceCredential WHERE id = ? AND license_key = ?`, id, license_key
+    );
+    if (!rows.length) return errorResponse(res, 'Credential not found', 404);
+    await prisma.$executeRawUnsafe(`DELETE FROM PosDeviceCredential WHERE id = ?`, id);
+    return successResponse(res, {}, 200, 'Credential deleted');
+  } catch (err) {
+    return errorResponse(res, err.message || 'Failed to delete credential', 500);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 module.exports = {
   validateLicense, syncSales, getStatus, getDevices, sendDeviceCommand, syncAllData, loadAllData,
   verifyOperatorPin, listOperators, createOperator, updateOperator, removeOperator,
   registerDevice, listPosDevices, reassignDevice, deregisterDevice,
+  createDeviceCredential, listDeviceCredentials, deleteDeviceCredential,
 };
