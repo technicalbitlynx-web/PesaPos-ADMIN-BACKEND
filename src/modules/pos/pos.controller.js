@@ -881,6 +881,40 @@ async function deregisterDevice(req, res) {
   }
 }
 
+// ─── Admin: Delete Device (no manager PIN required) ──────────────────────────
+
+async function adminDeleteDevice(req, res) {
+  try {
+    const { deviceId } = req.params;
+
+    const existing = await prisma.licenseDevice.findFirst({
+      where: { device_id: deviceId, is_active: true },
+    });
+    if (!existing) return errorResponse(res, 'Device not found or already removed', 404);
+
+    await prisma.licenseDevice.updateMany({
+      where: { device_id: deviceId },
+      data: { is_active: false },
+    });
+
+    await logDeviceAudit({
+      license_key: existing.license_key, device_id: deviceId,
+      device_type: existing.device_type, user_id: 'admin',
+      action: 'deregister', result: 'success', ip_address: req.ip,
+    });
+
+    try {
+      const { getSocketManager } = require('../../websocket/socketManager');
+      const sm = getSocketManager();
+      if (sm) sm.notifyDevice(deviceId, 'pos:refresh', { reason: 'device_deregistered' });
+    } catch {}
+
+    return successResponse(res, { data: { deregistered: true, device_id: deviceId } }, 200, 'Device removed');
+  } catch (err) {
+    return errorResponse(res, err.message || 'Error', 500);
+  }
+}
+
 // ─── POS Device Credentials ──────────────────────────────────────────────────
 
 async function createDeviceCredential(req, res) {
@@ -1049,7 +1083,7 @@ async function manageOperator(req, res, next) {
 module.exports = {
   validateLicense, syncSales, getStatus, getDevices, sendDeviceCommand, syncAllData, loadAllData,
   verifyOperatorPin, listOperators, createOperator, updateOperator, removeOperator,
-  registerDevice, listPosDevices, reassignDevice, deregisterDevice,
+  registerDevice, listPosDevices, reassignDevice, deregisterDevice, adminDeleteDevice,
   createDeviceCredential, listDeviceCredentials, deleteDeviceCredential,
   manageOperator,
 };

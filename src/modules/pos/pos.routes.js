@@ -25,6 +25,7 @@ router.delete('/operators/:id', authenticate, authorize('operators:write'), cont
 
 // Admin-only: full device overview + remote commands
 router.get('/devices', authenticate, controller.getDevices);
+router.delete('/devices/:deviceId', authenticate, controller.adminDeleteDevice);
 router.post('/devices/:deviceId/command', authenticate, controller.sendDeviceCommand);
 
 // Public device management — authenticated via license_key (+ manager PIN for write ops)
