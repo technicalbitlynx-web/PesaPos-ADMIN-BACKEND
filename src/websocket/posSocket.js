@@ -111,28 +111,45 @@ function setupWebSocket(io) {
       // ── Real-time data sync between devices ──────────────────────────────
       socket.on('pos:data-push', async (payload) => {
         try {
-          // Persist to cloud as the latest snapshot
-          const { license_key: lk, products, sales, credits, customers, suppliers, expenses, quotations } = payload;
-          if (lk) {
-            const blob = {};
-            if (products)   blob.products   = JSON.stringify(products);
-            if (sales)      blob.sales       = JSON.stringify(sales);
-            if (credits)    blob.credits     = JSON.stringify(credits);
-            if (customers)  blob.customers   = JSON.stringify(customers);
-            if (suppliers)  blob.suppliers   = JSON.stringify(suppliers);
-            if (expenses)   blob.expenses    = JSON.stringify(expenses);
-            if (quotations) blob.quotations  = JSON.stringify(quotations);
-            // Fire-and-forget: persist snapshot but don't block the broadcast
-            if (Object.keys(blob).length) {
-              prisma.posData.upsert({
-                where: { license_key: lk },
-                update: { ...blob, updated_at: new Date() },
-                create: { license_key: lk, ...blob },
-              }).catch(() => {});
-            }
-          }
-          // Broadcast instantly using the license room (O(1), no fetchSockets scan)
+          // Broadcast instantly — don't wait for DB persistence
           socket.to('license:' + licenseKey).emit('pos:data-push', payload);
+
+          // Persist using last-write-wins merge so socket pushes never trample each other
+          const { license_key: lk, products, sales, credits, customers, suppliers, expenses, quotations } = payload;
+          if (!lk) return;
+
+          const safeparse = (s) => { if (!s) return []; try { const a = JSON.parse(s); return Array.isArray(a) ? a : []; } catch { return []; } };
+          function mergeByKey(existingJson, incoming, keyFn) {
+            if (!Array.isArray(incoming) || incoming.length === 0) return existingJson;
+            const ex = safeparse(existingJson);
+            const map = new Map();
+            for (const r of ex)       { const k = keyFn(r); if (k != null) map.set(k, r); }
+            for (const r of incoming) {
+              const k = keyFn(r);
+              if (k == null) continue;
+              const old = map.get(k);
+              if (!old || (r.updatedAt || '') >= (old.updatedAt || '')) map.set(k, r);
+            }
+            return JSON.stringify([...map.values()]);
+          }
+
+          const existing = await prisma.posData.findUnique({ where: { license_key: lk } });
+          const data = {};
+          if (products)   data.products   = mergeByKey(existing?.products,   products,   r => r.id || r.barcode);
+          if (sales)      data.sales       = mergeByKey(existing?.sales,       sales,       r => r.id || (r.receipt_number != null && r.barcode ? `${r.receipt_number}:${r.barcode}:${r.timestamp||''}` : null));
+          if (credits)    data.credits     = mergeByKey(existing?.credits,     credits,     r => r.id);
+          if (customers)  data.customers   = mergeByKey(existing?.customers,   customers,   r => r.id || r.phone);
+          if (suppliers)  data.suppliers   = mergeByKey(existing?.suppliers,   suppliers,   r => r.id || r.name);
+          if (expenses)   data.expenses    = mergeByKey(existing?.expenses,    expenses,    r => r.id);
+          if (quotations) data.quotations  = mergeByKey(existing?.quotations,  quotations,  r => r.id);
+
+          if (Object.keys(data).length) {
+            prisma.posData.upsert({
+              where: { license_key: lk },
+              update: data,
+              create: { license_key: lk, ...data },
+            }).catch(() => {});
+          }
         } catch (err) {
           logger.error('pos:data-push error', { message: err.message });
         }
