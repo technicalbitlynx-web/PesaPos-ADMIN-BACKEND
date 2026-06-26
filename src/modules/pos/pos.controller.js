@@ -349,17 +349,57 @@ async function syncAllData(req, res) {
   try {
     const { license_key, products, sales, credits, suppliers, expenses, stock_log, quotations, customers, purchase_orders, shifts } = req.body;
     await requireActiveLicense(license_key);
+
+    const existing = await prisma.posData.findUnique({ where: { license_key } });
+
+    const safeparse = (s) => {
+      if (!s) return [];
+      try { const a = JSON.parse(s); return Array.isArray(a) ? a : []; } catch { return []; }
+    };
+
+    // Last-write-wins merge per record — never deletes, only adds or updates with newer data.
+    // keyFn must return a stable string that uniquely identifies the record.
+    function mergeByKey(existingJson, incoming, keyFn) {
+      if (!Array.isArray(incoming) || incoming.length === 0) return existingJson; // nothing incoming → keep existing
+      const ex = safeparse(existingJson);
+      const map = new Map();
+      for (const r of ex)       { const k = keyFn(r); if (k != null) map.set(k, r); }
+      for (const r of incoming) {
+        const k = keyFn(r);
+        if (k == null) continue;
+        const old = map.get(k);
+        if (!old || (r.updatedAt || '') >= (old.updatedAt || '')) map.set(k, r);
+      }
+      return JSON.stringify([...map.values()]);
+    }
+
+    // stock_log entries have no stable id — take whichever array is longer (more complete)
+    function mergeStockLog(existingJson, incoming) {
+      if (!Array.isArray(incoming) || incoming.length === 0) return existingJson;
+      const ex = safeparse(existingJson);
+      return incoming.length >= ex.length ? JSON.stringify(incoming) : existingJson;
+    }
+
+    const productKey  = r => r.barcode || r.id;
+    const saleKey     = r => r.id || (r.receipt_number != null && r.barcode
+                              ? `${r.receipt_number}:${r.barcode}:${r.timestamp || ''}`
+                              : null);
+    const simpleId    = r => r.id;
+    const supplierKey = r => r.id || r.name;
+    const custKey     = r => r.id || r.phone;
+
     const data = {};
-    if (products        !== undefined) data.products        = JSON.stringify(products);
-    if (sales           !== undefined) data.sales           = JSON.stringify(sales);
-    if (credits         !== undefined) data.credits         = JSON.stringify(credits);
-    if (suppliers       !== undefined) data.suppliers       = JSON.stringify(suppliers);
-    if (expenses        !== undefined) data.expenses        = JSON.stringify(expenses);
-    if (stock_log       !== undefined) data.stock_log       = JSON.stringify(stock_log);
-    if (quotations      !== undefined) data.quotations      = JSON.stringify(quotations);
-    if (customers       !== undefined) data.customers       = JSON.stringify(customers);
-    if (purchase_orders !== undefined) data.purchase_orders = JSON.stringify(purchase_orders);
-    if (shifts          !== undefined) data.shifts          = JSON.stringify(shifts);
+    if (products        !== undefined) data.products        = mergeByKey(existing?.products,        products,        productKey);
+    if (sales           !== undefined) data.sales           = mergeByKey(existing?.sales,           sales,           saleKey);
+    if (credits         !== undefined) data.credits         = mergeByKey(existing?.credits,         credits,         simpleId);
+    if (suppliers       !== undefined) data.suppliers       = mergeByKey(existing?.suppliers,       suppliers,       supplierKey);
+    if (expenses        !== undefined) data.expenses        = mergeByKey(existing?.expenses,        expenses,        simpleId);
+    if (quotations      !== undefined) data.quotations      = mergeByKey(existing?.quotations,      quotations,      simpleId);
+    if (customers       !== undefined) data.customers       = mergeByKey(existing?.customers,       customers,       custKey);
+    if (purchase_orders !== undefined) data.purchase_orders = mergeByKey(existing?.purchase_orders, purchase_orders, simpleId);
+    if (shifts          !== undefined) data.shifts          = mergeByKey(existing?.shifts,          shifts,          simpleId);
+    if (stock_log       !== undefined) data.stock_log       = mergeStockLog(existing?.stock_log,    stock_log);
+
     await prisma.posData.upsert({
       where:  { license_key },
       update: data,
