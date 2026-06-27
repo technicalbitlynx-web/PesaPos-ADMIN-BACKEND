@@ -179,4 +179,12 @@ async function revoke(id) {
   return updated;
 }
 
-module.exports = { generate, findAll, findOne, validate, activate, suspend, revoke };
+async function updateSlots(id, { manager_slots, pos_slots }) {
+  const license = await findOne(id);
+  const data = {};
+  if (manager_slots !== undefined) data.manager_slots = manager_slots === null ? null : parseInt(manager_slots);
+  if (pos_slots !== undefined)     data.pos_slots     = pos_slots     === null ? null : parseInt(pos_slots);
+  return prisma.license.update({ where: { id: license.id }, data });
+}
+
+module.exports = { generate, findAll, findOne, validate, activate, suspend, revoke, updateSlots };

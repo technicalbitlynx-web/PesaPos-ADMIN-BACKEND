@@ -122,6 +122,8 @@ model License {
   activation_date    DateTime?
   expiry_date        DateTime?
   last_check         DateTime?
+  manager_slots      Int?
+  pos_slots          Int?
   created_at         DateTime  @default(now())
   updated_at         DateTime  @updatedAt
 

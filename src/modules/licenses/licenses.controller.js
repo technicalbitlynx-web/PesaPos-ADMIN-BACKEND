@@ -68,4 +68,15 @@ async function revoke(req, res, next) {
   }
 }
 
-module.exports = { generate, findAll, findOne, validate, activate, suspend, revoke };
+async function updateSlots(req, res, next) {
+  try {
+    const { manager_slots, pos_slots } = req.body;
+    const data = await service.updateSlots(req.params.id, { manager_slots, pos_slots });
+    successResponse(res, { data }, 200, 'Slots updated');
+  } catch (err) {
+    if (err.statusCode) return errorResponse(res, err.message, err.statusCode);
+    next(err);
+  }
+}
+
+module.exports = { generate, findAll, findOne, validate, activate, suspend, revoke, updateSlots };

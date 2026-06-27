@@ -25,9 +25,12 @@ function normalizePlatform(platform) {
   return 'desktop';
 }
 
-function getPlanLimits(planName) {
-  const key = (planName || 'starter').toLowerCase().replace(/[\s\-]+/g, '_');
-  return DEVICE_LIMITS[key] || DEVICE_LIMITS.starter;
+function getPlanLimits(planName, licenseOverride) {
+  const base = DEVICE_LIMITS[(planName || 'starter').toLowerCase().replace(/[\s\-]+/g, '_')] || DEVICE_LIMITS.starter;
+  return {
+    manager: licenseOverride?.manager_slots ?? base.manager,
+    pos:     licenseOverride?.pos_slots     ?? base.pos,
+  };
 }
 
 async function getDeviceCount(license_key, device_type, excludeDeviceId = null) {
@@ -146,7 +149,7 @@ async function validateLicense(req, res) {
     }
 
     const planName = license.subscription?.plan_name || 'starter';
-    const limits = getPlanLimits(planName);
+    const limits = getPlanLimits(planName, license);
     const [usedManagers, usedPos] = await Promise.all([
       getDeviceCount(license_key, 'manager'),
       getDeviceCount(license_key, 'pos'),
@@ -581,7 +584,7 @@ async function registerDevice(req, res) {
         }
       }
 
-      const limits = getPlanLimits(license.subscription?.plan_name);
+      const limits = getPlanLimits(license.subscription?.plan_name, license);
       const limit = limits.manager;
       const existing = await prisma.licenseDevice.findUnique({
         where: { license_key_device_id: { license_key, device_id } },
@@ -599,7 +602,7 @@ async function registerDevice(req, res) {
     // ── POS registration: check slot limit then require a valid access code ────
     if (device_type === 'pos') {
       // Check POS slot limit first
-      const limits = getPlanLimits(license.subscription?.plan_name);
+      const limits = getPlanLimits(license.subscription?.plan_name, license);
       const posLimit = limits.pos;
       const existingPosRow = await prisma.licenseDevice.findUnique({
         where: { license_key_device_id: { license_key, device_id } },
@@ -724,7 +727,7 @@ async function listPosDevices(req, res) {
       },
     });
 
-    const limits = getPlanLimits(license.subscription?.plan_name);
+    const limits = getPlanLimits(license.subscription?.plan_name, license);
     const [usedManagers, usedPos] = await Promise.all([
       getDeviceCount(license_key, 'manager'),
       getDeviceCount(license_key, 'pos'),
@@ -779,7 +782,7 @@ async function reassignDevice(req, res) {
         where: { license_key },
         include: { subscription: { select: { plan_name: true } } },
       });
-      const limits = getPlanLimits(license?.subscription?.plan_name);
+      const limits = getPlanLimits(license?.subscription?.plan_name, license);
       const limit = limits.manager;
       const used = await getDeviceCount(license_key, 'manager', deviceId);
       if (used >= limit) {
@@ -797,7 +800,7 @@ async function reassignDevice(req, res) {
         where: { license_key },
         include: { subscription: { select: { plan_name: true } } },
       });
-      const limits = getPlanLimits(license?.subscription?.plan_name);
+      const limits = getPlanLimits(license?.subscription?.plan_name, license);
       const limit = limits.pos;
       const used = await getDeviceCount(license_key, 'pos', deviceId);
       if (used >= limit) {

@@ -16,5 +16,6 @@ router.get('/:id', authorize('licenses:read'), controller.findOne);
 router.patch('/:id/activate', authorize('licenses:update'), auditLog('ACTIVATE', 'license'), controller.activate);
 router.patch('/:id/suspend', authorize('licenses:update'), auditLog('SUSPEND', 'license'), controller.suspend);
 router.patch('/:id/revoke', authorize('licenses:update'), auditLog('REVOKE', 'license'), controller.revoke);
+router.patch('/:id/slots', authorize('licenses:update'), auditLog('UPDATE_SLOTS', 'license'), controller.updateSlots);
 
 module.exports = router;
