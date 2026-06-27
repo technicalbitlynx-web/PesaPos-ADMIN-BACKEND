@@ -36,6 +36,7 @@ model AdminUser {
   onboarded_clients Client[]   @relation("OfficerClients")
   ticket_replies    TicketReply[]
   audit_logs        AuditLog[]
+  expenses          AdminExpense[]
 }
 
 model Client {
@@ -238,6 +239,22 @@ model PosData {
   purchase_orders String?
   shifts          String?
   updated_at      DateTime @updatedAt
+}
+
+model AdminExpense {
+  id          String   @id @default(uuid())
+  amount      Float
+  category    String
+  description String
+  source      String
+  paid_by     String?
+  reference   String?
+  date        DateTime @default(now())
+  created_by  String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  creator AdminUser? @relation(fields: [created_by], references: [id])
 }
 
 model PosOperator {

@@ -16,6 +16,7 @@ const reportsRoutes = require('./modules/reports/reports.routes');
 const adminRoutes = require('./modules/admin/admin.routes');
 const posRoutes = require('./modules/pos/pos.routes');
 const marketingRoutes = require('./modules/marketing/marketing.routes');
+const expensesRoutes  = require('./modules/expenses/expenses.routes');
 
 const app = express();
 
@@ -51,6 +52,7 @@ app.use(`${API}/reports`, reportsRoutes);
 app.use(`${API}/admin`, adminRoutes);
 app.use(`${API}/pos`, posRoutes);
 app.use(`${API}/marketing`, marketingRoutes);
+app.use(`${API}/expenses`, expensesRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
